@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Society Maintenance Tracker</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="panel header-panel">
+      <div>
+        <h1>Society Maintenance Tracker</h1>
+        <p>Backend-first FastAPI complaint workflow demo with resident and admin roles.</p>
+      </div>
+      <div id="session" class="session">Not logged in</div>
+    </section>
+
+    <section class="panel auth-grid">
+      <form id="login-form">
+        <h2>Login</h2>
+        <input name="username" type="email" placeholder="Email" required>
+        <input name="password" type="password" placeholder="Password" required>
+        <button type="submit">Login</button>
+      </form>
+      <form id="register-form">
+        <h2>Resident Register</h2>
+        <input name="name" placeholder="Name" required>
+        <input name="email" type="email" placeholder="Email" required>
+        <input name="password" type="password" minlength="6" placeholder="Password, min 6 chars" required>
+        <input name="flat_number" placeholder="Flat number">
+        <input name="phone" placeholder="Phone">
+        <button type="submit">Register Resident</button>
+      </form>
+    </section>
+
+    <section class="panel action-grid">
+      <form id="complaint-form">
+        <h2>Resident: Raise Complaint</h2>
+        <input name="category" placeholder="Category, e.g. Plumbing" required>
+        <textarea name="description" placeholder="Describe the issue" required></textarea>
+        <input name="photo" type="file" accept="image/*">
+        <button type="submit">Submit Complaint</button>
+      </form>
+
+      <form id="update-form">
+        <h2>Admin: Update Complaint</h2>
+        <input name="complaint_id" type="number" min="1" placeholder="Complaint ID" required>
+        <select name="status">
+          <option value="Open">Open</option>
+          <option value="In Progress">In Progress</option>
+          <option value="Resolved">Resolved</option>
+        </select>
+        <select name="priority">
+          <option value="Low">Low</option>
+          <option value="Medium">Medium</option>
+          <option value="High">High</option>
+        </select>
+        <input name="note" placeholder="Optional note">
+        <button type="submit">Update</button>
+      </form>
+
+      <form id="notice-form">
+        <h2>Admin: Post Notice</h2>
+        <input name="title" placeholder="Notice title" required>
+        <textarea name="body" placeholder="Notice details" required></textarea>
+        <label class="check"><input name="is_important" type="checkbox"> Important notice</label>
+        <button type="submit">Post Notice</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Admin Filters</h2>
+      <form id="filter-form" class="filter-grid">
+        <input name="category" placeholder="Category">
+        <select name="status">
+          <option value="">Any status</option>
+          <option value="Open">Open</option>
+          <option value="In Progress">In Progress</option>
+          <option value="Resolved">Resolved</option>
+        </select>
+        <select name="priority">
+          <option value="">Any priority</option>
+          <option value="Low">Low</option>
+          <option value="Medium">Medium</option>
+          <option value="High">High</option>
+        </select>
+        <input name="created_on" type="date">
+        <button type="submit">Apply Filters</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="toolbar">
+        <button id="mine">My Complaints</button>
+        <button id="admin-list">All Complaints</button>
+        <button id="notices">Notices</button>
+        <button id="dashboard">Dashboard</button>
+      </div>
+      <div id="message" class="message">Use admin@example.com / Admin@123 for admin testing.</div>
+      <div id="output" class="output"></div>
+    </section>
+  </main>
+
+  <script>
+    let token = "";
+    let currentUser = null;
+
+    const session = document.querySelector("#session");
+    const message = document.querySelector("#message");
+    const output = document.querySelector("#output");
+
+    const showMessage = text => message.textContent = text;
+    const authHeaders = () => {
+      if (!token) {
+        showMessage("Please login first, then try this action again.");
+        return null;
+      }
+      return { Authorization: `Bearer ${token}` };
+    };
+
+    const api = async (url, options = {}) => {
+      const res = await fetch(url, options);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(Array.isArray(data.detail) ? data.detail[0].msg : data.detail || "Request failed");
+      return data;
+    };
+
+    const renderUser = user => {
+      output.innerHTML = `
+        <article class="item">
+          <div class="item-head">
+            <strong>${user.name}</strong>
+            <span>${user.role}</span>
+          </div>
+          <p>${user.email}</p>
+          <small>${user.flat_number || "No flat number added"}</small>
+        </article>
+      `;
+    };
+
+    const renderComplaints = complaints => {
+      if (!complaints.length) {
+        output.innerHTML = '<p class="empty">No complaints found.</p>';
+        return;
+      }
+      output.innerHTML = complaints.map(item => {
+        const history = item.history.map(row => `${row.new_status} at ${new Date(row.created_at).toLocaleString()}${row.note ? ` - ${row.note}` : ""}`).join("<br>");
+        return `
+          <article class="item">
+            <div class="item-head">
+              <strong>#${item.id} ${item.category}</strong>
+              <span>${item.status} | ${item.priority}${item.is_overdue ? ' | Overdue' : ''}</span>
+            </div>
+            <p>${item.description}</p>
+            <small>${history || "No history yet"}</small>
+          </article>
+        `;
+      }).join("");
+    };
+
+    const renderNotices = notices => {
+      if (!notices.length) {
+        output.innerHTML = '<p class="empty">No notices posted.</p>';
+        return;
+      }
+      output.innerHTML = notices.map(item => `
+        <article class="item ${item.is_important ? 'important' : ''}">
+          <div class="item-head">
+            <strong>${item.title}</strong>
+            <span>${item.is_important ? 'Important' : 'Normal'}</span>
+          </div>
+          <p>${item.body}</p>
+        </article>
+      `).join("");
+    };
+
+    const renderDashboard = data => {
+      const statusRows = Object.entries(data.by_status)
+        .map(([label, count]) => `<div class="metric-row"><span>${label}</span><strong>${count}</strong></div>`)
+        .join("") || '<p class="empty">No status data yet.</p>';
+      const categoryRows = Object.entries(data.by_category)
+        .map(([label, count]) => `<div class="metric-row"><span>${label}</span><strong>${count}</strong></div>`)
+        .join("") || '<p class="empty">No category data yet.</p>';
+
+      output.innerHTML = `
+        <div class="stats">
+          <div><strong>${data.overdue_count}</strong><span>Overdue</span></div>
+          <div><strong>${Object.values(data.by_status).reduce((a, b) => a + b, 0)}</strong><span>Total complaints</span></div>
+          <div><strong>${Object.keys(data.by_category).length}</strong><span>Categories</span></div>
+        </div>
+        <div class="dashboard-grid">
+          <section><h2>Status Summary</h2>${statusRows}</section>
+          <section><h2>Category Summary</h2>${categoryRows}</section>
+        </div>
+      `;
+    };
+
+    const buildFilterUrl = () => {
+      const values = Object.fromEntries(new FormData(document.querySelector("#filter-form")));
+      const params = new URLSearchParams();
+      Object.entries(values).forEach(([key, value]) => {
+        if (value) params.set(key, value);
+      });
+      const query = params.toString();
+      return query ? `/api/complaints?${query}` : "/api/complaints";
+    };
+
+    const loadMe = async () => {
+      currentUser = await api("/api/auth/me", { headers: authHeaders() });
+      session.textContent = `${currentUser.name} (${currentUser.role})`;
+      showMessage(`Logged in as ${currentUser.role}. Choose an action below.`);
+    };
+
+    document.querySelector("#login-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      try {
+        const body = new URLSearchParams(new FormData(event.target));
+        const data = await api("/api/auth/login", { method: "POST", body });
+        token = data.access_token || "";
+        await loadMe();
+      } catch (err) {
+        showMessage(err.message);
+      }
+    });
+
+    document.querySelector("#register-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      try {
+        const payload = Object.fromEntries(new FormData(event.target));
+        const data = await api("/api/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        renderUser(data);
+        showMessage("Resident created. Login with this email/password now.");
+      } catch (err) {
+        showMessage(err.message);
+      }
+    });
+
+    document.querySelector("#complaint-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const headers = authHeaders();
+      if (!headers) return;
+      try {
+        const data = await api("/api/complaints", { method: "POST", headers, body: new FormData(event.target) });
+        renderComplaints([data]);
+        showMessage("Complaint submitted.");
+      } catch (err) {
+        showMessage(err.message);
+      }
+    });
+
+    document.querySelector("#update-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const headers = authHeaders();
+      if (!headers) return;
+      const values = Object.fromEntries(new FormData(event.target));
+      const payload = { status: values.status, priority: values.priority, note: values.note || null };
+      try {
+        const data = await api(`/api/complaints/${values.complaint_id}`, {
+          method: "PATCH",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        renderComplaints([data]);
+        showMessage("Complaint updated.");
+      } catch (err) {
+        showMessage(err.message);
+      }
+    });
+
+    document.querySelector("#notice-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const headers = authHeaders();
+      if (!headers) return;
+      const values = Object.fromEntries(new FormData(event.target));
+      const payload = { title: values.title, body: values.body, is_important: values.is_important === "on" };
+      try {
+        const data = await api("/api/notices", {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        renderNotices([data]);
+        showMessage("Notice posted.");
+      } catch (err) {
+        showMessage(err.message);
+      }
+    });
+
+    document.querySelector("#filter-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const headers = authHeaders();
+      if (!headers) return;
+      try { renderComplaints(await api(buildFilterUrl(), { headers })); } catch (err) { showMessage(err.message); }
+    });
+
+    document.querySelector("#mine").onclick = async () => {
+      const headers = authHeaders();
+      if (!headers) return;
+      try { renderComplaints(await api("/api/complaints/mine", { headers })); } catch (err) { showMessage(err.message); }
+    };
+    document.querySelector("#admin-list").onclick = async () => {
+      const headers = authHeaders();
+      if (!headers) return;
+      try { renderComplaints(await api(buildFilterUrl(), { headers })); } catch (err) { showMessage(err.message); }
+    };
+    document.querySelector("#notices").onclick = async () => {
+      const headers = authHeaders();
+      if (!headers) return;
+      try { renderNotices(await api("/api/notices", { headers })); } catch (err) { showMessage(err.message); }
+    };
+    document.querySelector("#dashboard").onclick = async () => {
+      const headers = authHeaders();
+      if (!headers) return;
+      try { renderDashboard(await api("/api/dashboard", { headers })); } catch (err) { showMessage(err.message); }
+    };
+  </script>
+</body>
+</html>
