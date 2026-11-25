@@ -1,5 +1,9 @@
 # Society Maintenance Tracker
 
+**Stack:** Python, FastAPI, SQLAlchemy, SQLite, JWT, HTML, CSS.
+
+**Workflow:** Residents submit and track complaints. Administrators use role-restricted endpoints to update priorities, review overdue complaints, and inspect status history.
+
 A FastAPI application for apartment-society complaint management. Residents submit complaints and view their history; admins manage status, priority, notices, and dashboard summaries. A small server-rendered browser interface is included for exercising the API.
 
 ## Features
